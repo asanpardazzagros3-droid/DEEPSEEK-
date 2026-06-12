@@ -1,0 +1,158 @@
+// ai-support-engine.ts - تکمیل شده
+import { DeepSeekAI } from 'deepseek-sdk';
+import { FinancialAuthorizer } from '../financial-management/financial-authorizer';
+import { LegalCompliance } from '../legal-compliance/legal-validator';
+import { InvoiceGenerator } from '../financial-management/invoice-generator';
+import { PaymentProcessor } from '../financial-management/payment-processor';
+
+export class DeepSeekAISupportEngine {
+    private deepSeekAI: DeepSeekAI;
+    private financialAuthorizer: FinancialAuthorizer;
+    private legalCompliance: LegalCompliance;
+    private invoiceGenerator: InvoiceGenerator;
+    private paymentProcessor: PaymentProcessor;
+    private supportSessions: Map<string, SupportSession> = new Map();
+
+    constructor(private config: AISupportConfig) {
+        this.initializeAIEngine();
+        this.setupFinancialAuthorizations();
+        this.initializePaymentSystem();
+    }
+
+    private async initializeAIEngine(): Promise<void> {
+        this.deepSeekAI = new DeepSeekAI({
+            apiKey: this.config.apiKey,
+            model: 'deepseek-chat',
+            maxTokens: 4000,
+            temperature: 0.7,
+            enableMultiModal: true,
+            contextWindow: 128000
+        });
+
+        console.log('🤖 موتور پشتیبانی DeepSeek راه‌اندازی شد');
+    }
+
+    private setupFinancialAuthorizations(): void {
+        this.financialAuthorizer = new FinancialAuthorizer({
+            maxInvoiceAmount: this.config.maxInvoiceAmount,
+            allowedCurrencies: this.config.allowedCurrencies,
+            paymentProcessors: this.config.paymentProcessors,
+            auditTrail: true,
+            autoApprovalLimit: this.config.autoApprovalLimit,
+            requireMultiSig: this.config.requireMultiSig
+        });
+
+        this.legalCompliance = new LegalCompliance({
+            jurisdiction: this.config.jurisdiction,
+            taxCompliance: true,
+            legalDocuments: this.config.legalDocuments,
+            kycRequired: this.config.kycRequired,
+            amlCompliance: this.config.amlCompliance
+        });
+    }
+
+    private initializePaymentSystem(): void {
+        this.invoiceGenerator = new InvoiceGenerator({
+            taxRates: this.config.taxRates,
+            currencyDefaults: this.config.currencyDefaults,
+            invoiceTemplates: this.config.invoiceTemplates
+        });
+
+        this.paymentProcessor = new PaymentProcessor({
+            gateways: this.config.paymentGateways,
+            retryAttempts: 3,
+            webhookUrls: this.config.webhookUrls
+        });
+    }
+
+    // ادامه کد قبلی...
+
+    // تکمیل تابع generateAndProcessInvoice
+    async generateAndProcessInvoice(
+        userId: string, 
+        services: ServiceItem[], 
+        paymentMethod: PaymentMethod
+    ): Promise<InvoiceProcessingResult> {
+        try {
+            // 1. ایجاد صورت حساب
+            const invoice = await this.createInvoice(userId, services);
+            
+            // 2. تأیید قانونی
+            await this.legalCompliance.validateInvoice(invoice);
+            
+            // 3. تأیید مالی
+            const authorization = await this.financialAuthorizer.authorizePayment({
+                userId,
+                amount: invoice.totalAmount,
+                currency: invoice.currency,
+                description: `Invoice #${invoice.invoiceNumber}`
+            });
+            
+            if (!authorization.approved) {
+                throw new Error(`Payment authorization failed: ${authorization.reason}`);
+            }
+            
+            // 4. پردازش پرداخت
+            const paymentResult = await this.paymentProcessor.processPayment({
+                invoiceId: invoice.id,
+                amount: invoice.totalAmount,
+                currency: invoice.currency,
+                paymentMethod,
+                customerInfo: invoice.customerInfo
+            });
+            
+            // 5. بروزرسانی وضعیت
+            invoice.status = 'paid';
+            invoice.paymentId = paymentResult.paymentId;
+            invoice.paidAt = new Date();
+            
+            // 6. ثبت در بلاکچین (اختیاری)
+            if (this.config.enableBlockchainRecording) {
+                await this.recordOnBlockchain(invoice, paymentResult);
+            }
+            
+            // 7. ارسال تأییدیه
+            await this.sendConfirmation(invoice, paymentResult);
+            
+            return {
+                success: true,
+                invoice,
+                paymentResult,
+                authorization
+            };
+            
+        } catch (error) {
+            console.error('Invoice processing failed:', error);
+            return {
+                success: false,
+                error: error.message,
+                invoice: null
+            };
+        }
+    }
+
+    // ایجاد صورت حساب
+    private async createInvoice(userId: string, services: ServiceItem[]): Promise<Invoice> {
+        const invoiceNumber = this.generateInvoiceNumber();
+        const subtotal = services.reduce((sum, service) => sum + service.price, 0);
+        const taxes = this.calculateTaxes(subtotal);
+        const total = subtotal + taxes;
+        
+        const invoice: Invoice = {
+            id: `INV-${Date.now()}`,
+            invoiceNumber,
+            userId,
+            date: new Date(),
+            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 روز
+            items: services,
+            subtotal,
+            taxes,
+            totalAmount: total,
+            currency: this.config.defaultCurrency,
+            status: 'pending',
+            customerInfo: await this.getUserInfo(userId)
+        };
+        
+        return this.invoiceGenerator.generateInvoice(invoice);
+    }
+}
