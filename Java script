@@ -1,0 +1,6 @@
+import axios from 'axios';
+// ... (کدهای مربوط به خواندن API Key از فایل .env)
+const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
+    model: 'deepseek-chat', // یا 'deepseek-coder' برای مسائل برنامه‌نویسی
+    messages: [{ role: 'user', content: 'یک تابع جاوااسکریپت برای جمع دو عدد بنویس' }],
+}, { headers: { 'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}` } });
